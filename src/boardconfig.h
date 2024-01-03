@@ -229,6 +229,7 @@ class BoardConfig {
     static ConfigData* activeConfig; // Pointer to the currently active configuration
     static ConfigSource configSource;
 
+    void initI2C();
     void init();
     void readIOBoards();
     void prepareConfig();

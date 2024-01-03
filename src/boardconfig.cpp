@@ -22,8 +22,7 @@ char BoardConfig::boardSerialString[25];
 char BoardConfig::boardHostnameString[12];
 bool BoardConfig::boardIsPicoW;
 
-
-void BoardConfig::init() {
+void BoardConfig::initI2C() {
     i2c_init(i2c0, 100 * 1000);
     gpio_set_function(PIN_I2C_SCL, GPIO_FUNC_I2C);
     gpio_set_function(PIN_I2C_SDA, GPIO_FUNC_I2C);
@@ -33,6 +32,10 @@ void BoardConfig::init() {
     // RP2040 datasheet and my measurements confirm that
     gpio_pull_up(PIN_I2C_SCL);
     gpio_pull_up(PIN_I2C_SDA);
+}
+
+void BoardConfig::init() {
+    initI2C();
 
     // Compute the third byte of the IP with a value from
     // the unique board id: 169.254.X.1 (board), 169.254.X.2 (host)
@@ -57,31 +60,34 @@ void BoardConfig::init() {
     memset(this->rawData, 0xff, 5*2048);
 }
 
+const uint8_t I2C_BASE_ADDR = 0x50; // this is 0x50 HEX, 80 DECIMAL
+
 void BoardConfig::readIOBoards() {
     this->responding[0] = false;
     this->responding[1] = false;
     this->responding[2] = false;
     this->responding[3] = false;
 
-    for (int addr = 80; addr < 84; ++addr) {
+    for (int idx = 0; idx < 4; ++idx) {
         int ret;
         uint8_t src = 0;
+        uint8_t addr = I2C_BASE_ADDR + idx;
         // Set EEPROM address to read from
-        i2c_write_blocking(i2c0, addr, &src, 1, false);
+        ret = i2c_write_blocking(i2c0, addr, &src, 1, false);
         // Try to read the EEPROM data
-        ret = i2c_read_blocking(i2c0, addr, this->rawData[addr - 80], 2048, false);
+        ret = i2c_read_blocking(i2c0, addr, this->rawData[idx], 2048, false);
         if (ret > 0) {
-            this->responding[addr - 80] = true;
-            if (this->rawData[addr - 80][0] == 0xff) {
+            this->responding[idx] = true;
+            if (this->rawData[idx][0] == 0xff) {
                 // EEPROM detected but content (boardType) invalid => yellow LED
-                statusLeds.setStatic(addr - 80, 1, 1, 0);
+                statusLeds.setStatic(idx, 1, 1, 0);
             } else {
                 // EEPROM detected and content seems valid => green LED
-                statusLeds.setStatic(addr - 80, 0, 1, 0);
+                statusLeds.setStatic(idx, 0, 1, 0);
             }
         } else {
             // EEPROM not detected :(
-                statusLeds.setStatic(addr - 80, 1, 0, 0);
+            statusLeds.setStatic(idx, 1, 0, 0);
         }
     }
     statusLeds.writeLeds();
@@ -188,7 +194,7 @@ int BoardConfig::configureBoard(uint8_t slot, struct ConfigData* config) {
 
     // configuring a board only makes sense for the IO boards, not for the baseboard
     if ((slot == 0) || (slot == 1) || (slot == 2) || (slot == 3)) {
-        uint8_t addr = 80 + slot;
+        uint8_t addr = I2C_BASE_ADDR + slot;
         // The I2C EEPROM works with 16-byte pages. The configuration data
         // fits all in one page
         // Since a prepended "0" (for the address to write in the EEPROM) is
@@ -258,7 +264,7 @@ int BoardConfig::saveConfig(uint8_t slot) {
                 memset(buffer, 0x00, 17);
                 buffer[0] = bytesWritten;
                 memcpy(buffer + 1, (uint8_t*)targetConfig + bytesWritten, writeSize);
-                actuallyWritten = i2c_write_blocking(i2c0, 80 + slot, buffer, writeSize + 1, false);
+                actuallyWritten = i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, writeSize + 1, false);
                 sleep_ms(5); // Give the EEPROM some time to finish the operation
                 LOG("actuallyWritten: %u", actuallyWritten);
                 bytesWritten += writeSize;
@@ -330,7 +336,7 @@ int BoardConfig::enableConfig(uint8_t slot) {
             // Save only the non-board-specific part
             buffer[0] = ConfigData_ConfigOffset; // byte address in the eeprom
             buffer[1] = CONFIG_VERSION; // configVersion => valid
-            i2c_write_blocking(i2c0, 80 + slot, buffer, 2, false);
+            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 2, false);
             sleep_ms(5); // Give the EEPROM some time to finish the operation
             return 0;
         } else if (!this->responding[slot]) {
@@ -396,7 +402,7 @@ int BoardConfig::disableConfig(uint8_t slot) {
             // Save only the non-board-specific part
             buffer[0] = ConfigData_ConfigOffset; // byte address in the eeprom
             buffer[1] = 0; // configVersion = 0 => invalid / disabled
-            i2c_write_blocking(i2c0, 80 + slot, buffer, 2, false);
+            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 2, false);
             sleep_ms(5); // Give the EEPROM some time to finish the operation
             return 0;
         } else if (!this->responding[slot]) {
