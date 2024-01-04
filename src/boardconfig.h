@@ -240,6 +240,7 @@ class BoardConfig {
     int disableConfig(uint8_t slot);
     int configureBoard(uint8_t slot, struct ConfigData* config);
     void logPatching(const char* prefix, Patching patching);
+    bool isConnected(uint8_t slot);
     void getLastErr(uint8_t slot, int *pLastErr, char *pLastErrPhase);
 
     ConfigData* configData[5]; // 0-3 = IOBoards, 4 = BaseBoard

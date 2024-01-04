@@ -489,6 +489,13 @@ void BoardConfig::logPatching(const char* prefix, Patching patching) {
     );
 }
 
+bool BoardConfig::isConnected(uint8_t slot) {
+    LOG("BoardConfig::isConnected(slot=%u)", slot);
+    bool result = this->responding[slot];
+    LOG("BoardConfig::isConnected(): returning %s", result ? "true" : "false" );
+    return result;
+}
+
 void BoardConfig::getLastErr(uint8_t slot, int *pLastErr, char *pLastErrPhase) {
     *pLastErr = lastErr[slot];
     *pLastErrPhase = lastErrPhase[slot];
