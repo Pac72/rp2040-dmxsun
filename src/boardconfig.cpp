@@ -70,14 +70,16 @@ void BoardConfig::readIOBoards() {
 
     for (int idx = 0; idx < 4; ++idx) {
         int ret;
+        uint8_t buf[3];
         uint8_t src = 0;
-        uint8_t addr = I2C_BASE_ADDR + idx;
+        uint8_t i2cAddr = I2C_BASE_ADDR + idx;
+        uint16_t eepromAddr = 0;
         // Set EEPROM address to read from
-        ret = i2c_write_blocking(i2c0, addr, &src, 1, false);
+        ret = i2c_write_blocking(i2c0, i2cAddr, (const uint8_t *)&eepromAddr, 2, true);
         // Try to read the EEPROM data
-        ret = i2c_read_blocking(i2c0, addr, this->rawData[idx], 2048, false);
+        ret = i2c_read_blocking(i2c0, i2cAddr, rawData[idx], 2048, false);
         if (ret > 0) {
-            this->responding[idx] = true;
+            responding[idx] = true;
             if (this->rawData[idx][0] == 0xff) {
                 // EEPROM detected but content (boardType) invalid => yellow LED
                 statusLeds.setStatic(idx, 1, 1, 0);
@@ -194,16 +196,16 @@ int BoardConfig::configureBoard(uint8_t slot, struct ConfigData* config) {
 
     // configuring a board only makes sense for the IO boards, not for the baseboard
     if ((slot == 0) || (slot == 1) || (slot == 2) || (slot == 3)) {
-        uint8_t addr = I2C_BASE_ADDR + slot;
+        uint8_t i2cAddr = I2C_BASE_ADDR + slot;
         // The I2C EEPROM works with 16-byte pages. The configuration data
         // fits all in one page
-        // Since a prepended "0" (for the address to write in the EEPROM) is
+        // Since a prepended 16 bit 0 (for the address to write in the EEPROM) is
         // required, do this in a new buffer
-        uint8_t bufSize = 1 + ConfigData_ConfigOffset;
-        uint8_t buffer[1 + ConfigData_ConfigOffset];
+        uint8_t bufSize = 2 + ConfigData_ConfigOffset;
+        uint8_t buffer[2 + ConfigData_ConfigOffset];
         memset(buffer, 0x00, bufSize);
-        memcpy(buffer + 1, config, ConfigData_ConfigOffset);
-        written = i2c_write_blocking(i2c0, addr, buffer, bufSize, false);
+        memcpy(buffer + 2, config, ConfigData_ConfigOffset);
+        written = i2c_write_blocking(i2c0, i2cAddr, buffer, bufSize, false);
         sleep_ms(5); // Give the EEPROM some time to finish the operation
     }
     LOG("BoardConfig written: %u", written);
@@ -238,7 +240,7 @@ int BoardConfig::saveConfig(uint8_t slot) {
     uint8_t bytesWritten;
     uint8_t writeSize;
     int actuallyWritten;
-    uint8_t buffer[17];
+    uint8_t buffer[18];
     int retVal;
 
     LOG("saveConfig to slot %u. Responding: %u", slot, this->responding[slot]);
@@ -261,10 +263,14 @@ int BoardConfig::saveConfig(uint8_t slot) {
             while (bytesToWrite)
             {
                 writeSize = bytesToWrite > 16 ? 16 : bytesToWrite;
-                memset(buffer, 0x00, 17);
-                buffer[0] = bytesWritten;
-                memcpy(buffer + 1, (uint8_t*)targetConfig + bytesWritten, writeSize);
-                actuallyWritten = i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, writeSize + 1, false);
+                memset(buffer, 0x00, sizeof(buffer));
+                buffer[0] = bytesWritten >> 8;
+                buffer[1] = bytesWritten & 0xff;
+                memcpy(buffer + 2, (uint8_t*)targetConfig + bytesWritten, writeSize);
+                actuallyWritten = i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, writeSize + 2, false);
+                if (actuallyWritten < 0) {
+                    return 3;
+                }
                 sleep_ms(5); // Give the EEPROM some time to finish the operation
                 LOG("actuallyWritten: %u", actuallyWritten);
                 bytesWritten += writeSize;
@@ -321,7 +327,7 @@ int BoardConfig::saveConfig(uint8_t slot) {
 
 int BoardConfig::enableConfig(uint8_t slot) {
     ConfigData* targetConfig = (ConfigData*)this->rawData[slot];
-    uint8_t buffer[17];
+    uint8_t buffer[18];
     int retVal;
 
     LOG("Enabling config in slot %u. Responding: %u", slot, this->responding[slot]);
@@ -334,9 +340,10 @@ int BoardConfig::enableConfig(uint8_t slot) {
             (targetConfig->boardType < BoardType::invalid_ff)
         ) {
             // Save only the non-board-specific part
-            buffer[0] = ConfigData_ConfigOffset; // byte address in the eeprom
-            buffer[1] = CONFIG_VERSION; // configVersion => valid
-            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 2, false);
+            buffer[0] = ConfigData_ConfigOffset >> 8; // byte address in the eeprom - high byte
+            buffer[1] = ConfigData_ConfigOffset & 0xff; // byte address in the eeprom - low byte
+            buffer[2] = CONFIG_VERSION; // configVersion => valid
+            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 3, false);
             sleep_ms(5); // Give the EEPROM some time to finish the operation
             return 0;
         } else if (!this->responding[slot]) {
@@ -387,7 +394,7 @@ int BoardConfig::enableConfig(uint8_t slot) {
 
 int BoardConfig::disableConfig(uint8_t slot) {
     ConfigData* targetConfig = (ConfigData*)this->rawData[slot];
-    uint8_t buffer[17];
+    uint8_t buffer[18];
     int retVal;
 
     LOG("Disabling config in slot %u. Responding: %u", slot, this->responding[slot]);
@@ -400,9 +407,10 @@ int BoardConfig::disableConfig(uint8_t slot) {
             (targetConfig->boardType < BoardType::invalid_ff)
         ) {
             // Save only the non-board-specific part
-            buffer[0] = ConfigData_ConfigOffset; // byte address in the eeprom
-            buffer[1] = 0; // configVersion = 0 => invalid / disabled
-            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 2, false);
+            buffer[0] = ConfigData_ConfigOffset >> 8; // byte address in the eeprom - high byte
+            buffer[1] = ConfigData_ConfigOffset & 0xff; // byte address in the eeprom - low byte
+            buffer[2] = 0; // configVersion = 0 => invalid / disabled
+            i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, 3, false);
             sleep_ms(5); // Give the EEPROM some time to finish the operation
             return 0;
         } else if (!this->responding[slot]) {
