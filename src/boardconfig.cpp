@@ -63,19 +63,24 @@ void BoardConfig::init() {
 const uint8_t I2C_BASE_ADDR = 0x50; // this is 0x50 HEX, 80 DECIMAL
 
 void BoardConfig::readIOBoards() {
-    this->responding[0] = false;
-    this->responding[1] = false;
-    this->responding[2] = false;
-    this->responding[3] = false;
-
     for (int idx = 0; idx < 4; ++idx) {
         int ret;
         uint8_t buf[3];
         uint8_t src = 0;
         uint8_t i2cAddr = I2C_BASE_ADDR + idx;
         uint16_t eepromAddr = 0;
+        responding[idx] = false;
+        lastErr[idx] = 0;
+        lastErrPhase[idx] = '-';
         // Set EEPROM address to read from
         ret = i2c_write_blocking(i2c0, i2cAddr, (const uint8_t *)&eepromAddr, 2, true);
+        if (ret < 0) {
+            // EEPROM not detected :(
+            statusLeds.setStatic(idx, 1, 0, 0);
+            lastErr[idx] = ret;
+            lastErrPhase[idx] = 'W';
+            continue;
+        }
         // Try to read the EEPROM data
         ret = i2c_read_blocking(i2c0, i2cAddr, rawData[idx], 2048, false);
         if (ret > 0) {
@@ -90,6 +95,8 @@ void BoardConfig::readIOBoards() {
         } else {
             // EEPROM not detected :(
             statusLeds.setStatic(idx, 1, 0, 0);
+            lastErr[idx] = ret;
+            lastErrPhase[idx] = 'R';
         }
     }
     statusLeds.writeLeds();
@@ -480,6 +487,11 @@ void BoardConfig::logPatching(const char* prefix, Patching patching) {
         patching.active,
         patching.ethDestParams
     );
+}
+
+void BoardConfig::getLastErr(uint8_t slot, int *pLastErr, char *pLastErrPhase) {
+    *pLastErr = lastErr[slot];
+    *pLastErrPhase = lastErrPhase[slot];
 }
 
 uint8_t getUsbProtocol() {

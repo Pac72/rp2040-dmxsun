@@ -240,12 +240,15 @@ class BoardConfig {
     int disableConfig(uint8_t slot);
     int configureBoard(uint8_t slot, struct ConfigData* config);
     void logPatching(const char* prefix, Patching patching);
+    void getLastErr(uint8_t slot, int *pLastErr, char *pLastErrPhase);
 
     ConfigData* configData[5]; // 0-3 = IOBoards, 4 = BaseBoard
 
     bool createdDefaultConfig;
 
     bool responding[4];       // True if the board resonded to the bus scan
+    int lastErr[4];
+    char lastErrPhase[4];
 
     static uint8_t shortId; // The part of the unique id that is used as the third byte
                             // of the usb eth's IP address
