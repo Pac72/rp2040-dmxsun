@@ -243,9 +243,10 @@ int BoardConfig::saveConfig(uint8_t slot) {
     uint8_t buffer[18];
     int retVal;
 
-    LOG("saveConfig to slot %u. Responding: %u", slot, this->responding[slot]);
+    LOG("saveConfig(slot=%u)", slot);
 
     if ((slot == 0) || (slot == 1) || (slot == 2) || (slot == 3)) {
+        LOG("saveConfig(): saving configuration to IO board %u - responding:%u target boardType:%u", slot, this->responding[slot], targetConfig->boardType);
         // Save to an IO board, so check if it's connected and configured
         if (
             (this->responding[slot]) &&
@@ -259,7 +260,7 @@ int BoardConfig::saveConfig(uint8_t slot) {
             memcpy(dest, src, copySize);
             bytesToWrite = sizeof(struct ConfigData);
             bytesWritten = 0;
-            LOG("START bytesToWrite: %u. ConfigVersion: %u", bytesToWrite, targetConfig->configVersion);
+            LOG("saveConfig(): START bytesToWrite: %u. ConfigVersion: %u", bytesToWrite, targetConfig->configVersion);
             while (bytesToWrite)
             {
                 writeSize = bytesToWrite > 16 ? 16 : bytesToWrite;
@@ -268,28 +269,33 @@ int BoardConfig::saveConfig(uint8_t slot) {
                 buffer[1] = bytesWritten & 0xff;
                 memcpy(buffer + 2, (uint8_t*)targetConfig + bytesWritten, writeSize);
                 actuallyWritten = i2c_write_blocking(i2c0, I2C_BASE_ADDR + slot, buffer, writeSize + 2, false);
+                LOG("saveConfig(): actuallyWritten: %d", actuallyWritten);
                 if (actuallyWritten < 0) {
+                    LOG("saveConfig(): ERROR writing to EEPROM on board %u", slot);
                     return 3;
                 }
                 sleep_ms(5); // Give the EEPROM some time to finish the operation
-                LOG("actuallyWritten: %u", actuallyWritten);
                 bytesWritten += writeSize;
                 bytesToWrite -= writeSize;
-                LOG("POST bytesToWrite: %u, writeSize: %u, bytesWritten: %u", bytesToWrite, writeSize, bytesWritten);
+                LOG("saveConfig(): POST bytesToWrite: %u, writeSize: %u, bytesWritten: %u", bytesToWrite, writeSize, bytesWritten);
             }
             // TODO: Compare after writing
+            LOG("saveConfig(): configuration saved to IO board %u", slot);
             return 0;
         } else if (!this->responding[slot]) {
             // IO board is not connected
+            LOG("saveConfig(): IO board %u is not connected", slot);
             return 1;
         } else {
             // IO board is connected but not configured
+            LOG("saveConfig(): IO board %u is connected but not configured", slot);
             return 2;
         }
     } else if (slot == 4) {
         // Save to the base board
         memcpy(targetConfig, BoardConfig::activeConfig, sizeof(ConfigData));
         targetConfig->boardType = BoardType::config_only_dongle;
+        LOG("saveConfig(): saving configuration to base board - set boardType=%u", slot, targetConfig->boardType);
 
         // We need to make sure core1 is not running when writing to the flash
         multicore_reset_core1();
@@ -307,6 +313,7 @@ int BoardConfig::saveConfig(uint8_t slot) {
         // Compare that what should have been written has been written
         if (memcmp(targetConfig, config_flash_contents, sizeof(ConfigData))) {
             // Comparison failed :-O
+            LOG("saveConfig(): ERROR - flash contents verification failed");
             retVal = 3;
         }
 
@@ -316,10 +323,14 @@ int BoardConfig::saveConfig(uint8_t slot) {
         // Restart core1
         multicore_launch_core1(core1_tasks);
 
+        LOG("saveConfig(): configuration saved to base board");
+
         // All good :)
         retVal = 0;
         return retVal;
     }
+
+    LOG("saveConfig(): ERROR - unknown slot %u", slot);
 
     // Slot unknown
     return 4;
